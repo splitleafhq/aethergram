@@ -13,6 +13,9 @@ set -eu
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
 
+# Git passes the refs being pushed on stdin; read them before anything else can consume it.
+REFS="$(cat)"
+
 ROOT="$(git rev-parse --show-toplevel)"
 CHECKS="$ROOT/Scripts/run-checks.sh"
 
@@ -26,5 +29,22 @@ CHECKS="$ROOT/Scripts/run-checks.sh"
     echo "[pre-push] refusing: Scripts/run-checks.sh failed, output above." >&2
     exit 1
 }
+
+# CI also checks a pushed release tag against the CHANGELOG heading of the commit it names, so run
+# the same check, on that commit's CHANGELOG, for each v* tag in this push. A deleted tag has no
+# commit to check.
+HEADING_TMP="$(mktemp)"
+trap 'rm -f "$HEADING_TMP"' EXIT
+printf '%s\n' "$REFS" | while read -r _ LOCAL_SHA REMOTE_REF _; do
+    case "$REMOTE_REF" in refs/tags/v*) ;; *) continue ;; esac
+    case "$LOCAL_SHA" in *[!0]*) ;; *) continue ;; esac
+    TAG="${REMOTE_REF#refs/tags/}"
+    COMMIT="$(git rev-parse "$LOCAL_SHA^{commit}")" \
+        && git show "$COMMIT:docs/CHANGELOG.md" > "$HEADING_TMP" \
+        && "$ROOT/Scripts/check-release-heading.sh" "$TAG" --changelog "$HEADING_TMP" || {
+        echo "[pre-push] refusing: tag $TAG does not match the CHANGELOG heading of the commit it names." >&2
+        exit 1
+    }
+done || exit 1
 
 exit 0
