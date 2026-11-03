@@ -17,7 +17,7 @@ git config core.hooksPath .githooks
 The hooks run `Scripts/scan-for-leaks.sh`, over the staged tree before the commit and over the
 message as it is written. It touches no network and takes milliseconds.
 
-`.githooks/pre-push` runs `Scripts/run-checks.sh` before a push, so a push cannot fail CI's suite.
+`.githooks/pre-push` refuses a push whose pushed commit isn't the checked-out HEAD or whose tree has uncommitted changes, so the checks test what is pushed. It then runs `Scripts/run-checks.sh` (also reachable as `Scripts/check`) before a push, so a push cannot fail CI's suite.
 It takes a few minutes. When the push carries a `v*` tag, it also runs `Scripts/check-release-heading.sh` on that tag against the CHANGELOG of the commit the tag names, as CI does.
 
 ## The rule that matters

@@ -16,6 +16,21 @@ unset $(git rev-parse --local-env-vars)
 # Git passes the refs being pushed on stdin; read them before anything else can consume it.
 REFS="$(cat)"
 
+# The checks test this working tree, so it must be exactly what is pushed. A pushed tag is
+# compared by the commit it names.
+HEAD_SHA="$(git rev-parse HEAD)"
+printf '%s\n' "$REFS" | while read -r _ LOCAL_SHA _ _; do
+    case "$LOCAL_SHA" in *[!0]*) ;; *) continue ;; esac
+    PUSHED="$(git rev-parse "$LOCAL_SHA^{commit}" 2>/dev/null || echo "$LOCAL_SHA")"
+    [ "$PUSHED" = "$HEAD_SHA" ] && continue
+    echo "pre-push: pushing $LOCAL_SHA but HEAD is $HEAD_SHA; check out the branch you push" >&2
+    exit 1
+done || exit 1
+if [ -n "$(git status --porcelain)" ]; then
+    echo "pre-push: uncommitted changes; commit or stash them so the check tests what is pushed" >&2
+    exit 1
+fi
+
 ROOT="$(git rev-parse --show-toplevel)"
 CHECKS="$ROOT/Scripts/run-checks.sh"
 

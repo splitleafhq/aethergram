@@ -1,0 +1,4 @@
+#!/bin/sh
+# The gate (repo standard E5): everything CI's suite job runs. It is Scripts/run-checks.sh; this is
+# the stable name for it.
+exec "$(cd "$(dirname "$0")" && pwd)/run-checks.sh" "$@"
