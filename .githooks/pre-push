@@ -1,65 +1,26 @@
-#!/bin/sh
-# Run the repo checks before a push, the same Scripts/run-checks.sh CI runs. Wire it up once per
-# clone:
-#
+#!/usr/bin/env bash
+# pre-push: run scripts/check, what CI runs. Enable once per clone:
 #   git config core.hooksPath .githooks
-#
-# It needs a full clone with the release tags, like the script itself.
-
-set -eu
-
-# git sets repo-local variables for a hook. Run from a worktree, GIT_DIR in them reaches the git
-# that the checks and swift run, and they act on the wrong repository.
+# Never skip it: a failure here is one CI would report. This file is the template every repo
+# copies byte for byte from splitleafhq/.github; change it there, where scripts/test-pre-push tests it.
+set -euo pipefail
+# Git's repo variables break tools run from a linked worktree.
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
-
-# Git passes the refs being pushed on stdin; read them before anything else can consume it.
-REFS="$(cat)"
-
-# The checks test this working tree, so it must be exactly what is pushed. A pushed tag is
-# compared by the commit it names.
-HEAD_SHA="$(git rev-parse HEAD)"
-printf '%s\n' "$REFS" | while read -r _ LOCAL_SHA _ _; do
-    case "$LOCAL_SHA" in *[!0]*) ;; *) continue ;; esac
-    PUSHED="$(git rev-parse "$LOCAL_SHA^{commit}" 2>/dev/null || echo "$LOCAL_SHA")"
-    [ "$PUSHED" = "$HEAD_SHA" ] && continue
-    echo "pre-push: pushing $LOCAL_SHA but HEAD is $HEAD_SHA; check out the branch you push" >&2
-    exit 1
-done || exit 1
-if [ -n "$(git status --porcelain)" ]; then
-    echo "pre-push: uncommitted changes; commit or stash them so the check tests what is pushed" >&2
-    exit 1
+cd "$(git rev-parse --show-toplevel)"
+# The check tests this working tree, so it must be exactly what is pushed.
+head=$(git rev-parse HEAD)
+while read -r _ sha _ _; do
+  # A deleted ref sends zeros; an annotated tag sends its tag object, so compare the commit it names.
+  [[ $sha == 0000000000000000000000000000000000000000 ]] && continue
+  [[ $(git rev-parse "$sha^{commit}") == "$head" ]] && continue
+  echo "pre-push: pushing $sha but HEAD is $head; check out the branch you push" >&2
+  exit 1
+done
+# Its own line, so set -e refuses the push when status itself fails.
+status=$(git status --porcelain)
+if [[ -n $status ]]; then
+  echo "pre-push: uncommitted changes; commit or stash them so the check tests what is pushed" >&2
+  exit 1
 fi
-
-ROOT="$(git rev-parse --show-toplevel)"
-CHECKS="$ROOT/Scripts/run-checks.sh"
-
-# A missing or non-executable gate must not look like one that passed.
-[ -x "$CHECKS" ] || {
-    echo "[pre-push] Scripts/run-checks.sh missing or not executable" >&2
-    exit 1
-}
-
-"$CHECKS" || {
-    echo "[pre-push] refusing: Scripts/run-checks.sh failed, output above." >&2
-    exit 1
-}
-
-# CI also checks a pushed release tag against the CHANGELOG heading of the commit it names, so run
-# the same check, on that commit's CHANGELOG, for each v* tag in this push. A deleted tag has no
-# commit to check.
-HEADING_TMP="$(mktemp)"
-trap 'rm -f "$HEADING_TMP"' EXIT
-printf '%s\n' "$REFS" | while read -r _ LOCAL_SHA REMOTE_REF _; do
-    case "$REMOTE_REF" in refs/tags/v*) ;; *) continue ;; esac
-    case "$LOCAL_SHA" in *[!0]*) ;; *) continue ;; esac
-    TAG="${REMOTE_REF#refs/tags/}"
-    COMMIT="$(git rev-parse "$LOCAL_SHA^{commit}")" \
-        && git show "$COMMIT:docs/CHANGELOG.md" > "$HEADING_TMP" \
-        && "$ROOT/Scripts/check-release-heading.sh" "$TAG" --changelog "$HEADING_TMP" || {
-        echo "[pre-push] refusing: tag $TAG does not match the CHANGELOG heading of the commit it names." >&2
-        exit 1
-    }
-done || exit 1
-
-exit 0
+exec scripts/check

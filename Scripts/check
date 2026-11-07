@@ -1,4 +1,14 @@
 #!/bin/sh
-# The gate (repo standard E5): everything CI's suite job runs. It is Scripts/run-checks.sh; this is
-# the stable name for it.
-exec "$(cd "$(dirname "$0")" && pwd)/run-checks.sh" "$@"
+# The gate (repo standard E5): everything CI's suite job runs, which is Scripts/run-checks.sh.
+# .githooks/pre-push runs it with HEAD equal to the pushed commit, so a release tag being pushed
+# points at HEAD: each v* tag there must match this commit's CHANGELOG heading, the check CI
+# runs on a tag push.
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+for TAG in $(git tag --points-at HEAD --list 'v*'); do
+    "$DIR/check-release-heading.sh" "$TAG" || {
+        echo "[check] refusing: tag $TAG does not match docs/CHANGELOG.md's top heading." >&2
+        exit 1
+    }
+done
+exec "$DIR/run-checks.sh" "$@"
